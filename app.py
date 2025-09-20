@@ -1,62 +1,61 @@
-import streamlit as st
-from faster_whisper import WhisperModel
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
-import queue
+import os
+import json
+import pyaudio
+import websockets
+import asyncio
 
-# ─────────────── SETTINGS ───────────────
-WHISPER_SIZE = "small"
-DEVICE = "cpu"
+API_KEY = os.getenv("OPENAI_API_KEY")  # set this in your terminal before running
+URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
 
-# ─────────────── INIT MODEL ───────────────
-@st.cache_resource
-def load_model():
-    with st.spinner("🔄 Loading Whisper model..."):
-        return WhisperModel(
-            WHISPER_SIZE,
-            device=DEVICE,
-            compute_type="int8",
-            cpu_threads=2,
-            download_root="./models"
+# Audio settings
+RATE = 16000
+CHUNK = 1024
+
+async def send_audio(ws):
+    p = pyaudio.PyAudio()
+    stream = p.open(format=pyaudio.paInt16,
+                    channels=1,
+                    rate=RATE,
+                    input=True,
+                    frames_per_buffer=CHUNK)
+
+    print("🎙️ Listening... Speak into your mic!")
+
+    try:
+        while True:
+            data = stream.read(CHUNK)
+            await ws.send(json.dumps({
+                "type": "input_audio_buffer.append",
+                "audio": data.hex()
+            }))
+    except KeyboardInterrupt:
+        print("Stopping...")
+    finally:
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+async def receive_transcripts(ws):
+    async for message in ws:
+        event = json.loads(message)
+        if event.get("type") == "transcript.delta":
+            text = event["delta"]
+            print("You said:", text, flush=True)
+
+async def main():
+    async with websockets.connect(
+        URL,
+        extra_headers={
+            "Authorization": f"Bearer {API_KEY}",
+            "OpenAI-Beta": "realtime=v1"
+        },
+        ping_interval=20,
+        ping_timeout=20
+    ) as ws:
+        await asyncio.gather(
+            send_audio(ws),
+            receive_transcripts(ws)
         )
 
-model = load_model()
-
-# ─────────────── AUDIO PROCESSOR ───────────────
-class AudioProcessor(AudioProcessorBase):
-    def __init__(self) -> None:
-        self.audio_queue = queue.Queue()
-
-    def recv_audio(self, frame):
-        # Incoming audio frames are sent here
-        audio_array = frame.to_ndarray().flatten().astype("float32")
-        self.audio_queue.put(audio_array)
-        return frame
-
-# ─────────────── STREAMLIT UI ───────────────
-st.set_page_config(page_title="Live Transcriber", page_icon="🎙️", layout="wide")
-st.title("🎙️ Real-Time Speech Transcriber")
-
-webrtc_ctx = webrtc_streamer(
-    key="speech-transcriber",
-    mode=WebRtcMode.SENDONLY,
-    audio_processor_factory=AudioProcessor,
-    media_stream_constraints={"audio": True, "video": False},
-)
-
-if webrtc_ctx and webrtc_ctx.audio_processor:
-    processor: AudioProcessor = webrtc_ctx.audio_processor
-    transcript_box = st.empty()
-    full_text = ""
-
-    # Process audio in background
-    while True:
-        try:
-            audio_chunk = processor.audio_queue.get(timeout=1)
-            # Transcribe short chunks
-            segments, _ = model.transcribe(audio_chunk, beam_size=1)
-            text = " ".join([s.text for s in segments]).strip()
-            if text:
-                full_text += " " + text
-                transcript_box.text_area("Transcript", full_text.strip(), height=300)
-        except queue.Empty:
-            continue
+if __name__ == "__main__":
+    asyncio.run(main())
