@@ -1,5 +1,5 @@
-# Transcriptor: 
-Try it here: [Transcriptor Live](https://transcriptorpankaj.streamlit.app/)
+# Transcriptor
+## Try it here: [Transcriptor Live](https://transcriptorpankaj.streamlit.app/)
 
 **Transcriptor** is a web application that converts uploaded speech files into text and automatically fills a form with the transcribed content.
 
