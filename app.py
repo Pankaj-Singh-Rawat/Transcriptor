@@ -1,61 +1,32 @@
-import os
-import json
-import pyaudio
-import websockets
-import asyncio
+import streamlit as st
+import openai
+import tempfile
+import sounddevice as sd
+import wavio
 
-API_KEY = os.getenv("OPENAI_API_KEY")  # set this in your terminal before running
-URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Audio settings
-RATE = 16000
-CHUNK = 1024
+st.title("Better Transcriptor 🎙️")
+st.write("Click record, speak your answer, and get instant transcription.")
 
-async def send_audio(ws):
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16,
-                    channels=1,
-                    rate=RATE,
-                    input=True,
-                    frames_per_buffer=CHUNK)
+duration = st.number_input("Recording duration (seconds)", min_value=3, max_value=60, value=5)
 
-    print("🎙️ Listening... Speak into your mic!")
-
-    try:
-        while True:
-            data = stream.read(CHUNK)
-            await ws.send(json.dumps({
-                "type": "input_audio_buffer.append",
-                "audio": data.hex()
-            }))
-    except KeyboardInterrupt:
-        print("Stopping...")
-    finally:
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-
-async def receive_transcripts(ws):
-    async for message in ws:
-        event = json.loads(message)
-        if event.get("type") == "transcript.delta":
-            text = event["delta"]
-            print("You said:", text, flush=True)
-
-async def main():
-    async with websockets.connect(
-        URL,
-        extra_headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "OpenAI-Beta": "realtime=v1"
-        },
-        ping_interval=20,
-        ping_timeout=20
-    ) as ws:
-        await asyncio.gather(
-            send_audio(ws),
-            receive_transcripts(ws)
-        )
-
-if __name__ == "__main__":
-    asyncio.run(main())
+if st.button("🎤 Record"):
+    st.write("Recording...")
+    fs = 16000
+    audio = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
+    sd.wait()
+    
+    # Save to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        wavio.write(tmp.name, audio, fs, sampwidth=2)
+        audio_file = open(tmp.name, "rb")
+    
+    # Send to OpenAI Whisper
+    transcript = openai.audio.transcriptions.create(
+        model="gpt-4o-transcribe", 
+        file=audio_file
+    )
+    
+    st.success("✅ Transcription:")
+    st.write(transcript["text"])
