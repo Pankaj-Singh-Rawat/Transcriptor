@@ -1,4 +1,5 @@
-# Transcriptor
+# Transcriptor: 
+Try it here: [Transcriptor Live](https://transcriptorpankaj.streamlit.app/)
 
 **Transcriptor** is a web application that converts uploaded speech files into text and automatically fills a form with the transcribed content.
 
@@ -7,8 +8,6 @@
 - Automatic speech-to-text conversion
 - Populates a form with the transcribed text
 
-## 🌐 Live Demo
-Try it here: [Transcriptor Live](https://transcriptorpankaj.streamlit.app/)
 
 ## 🛠️ Technologies Used
 - Python
